@@ -3,8 +3,8 @@
 No X API is used. Posts are read from (in order):
   1. your own feeds in EXTRA_FEEDS (optional, any RSS URL)
   2. public Nitter RSS feeds (xcancel.com etc.)
-  3. X's public "syndication" timeline (the data behind embedded timelines)
-The first source that answers wins. Run on a schedule (GitHub Actions).
+  3. X's public "syndication" timeline
+The first source that answers wins.
 """
 import html
 import json
@@ -66,7 +66,7 @@ def parse_rss(xml_text: str) -> list[dict]:
     for item in root.iter("item"):
         title = html.unescape(item.findtext("title") or "").strip()
         if title.startswith("RT by @") or title.startswith("R to @"):
-            continue  # retweets / replies: skipped (their IDs are not new posts)
+            continue  # retweets / replies are skipped
         ref = f"{item.findtext('link') or ''} {item.findtext('guid') or ''}"
         m = STATUS_RE.search(ref)
         if m:
@@ -138,7 +138,7 @@ def fetch_posts() -> list[dict]:
 
 # ---------- helpers ----------
 def id_time(post_id: str) -> datetime:
-    """Snowflake IDs embed their creation time."""
+    """Post IDs embed their creation time."""
     ms = (int(post_id) >> 22) + 1288834974657
     return datetime.fromtimestamp(ms / 1000, timezone.utc)
 
@@ -181,7 +181,7 @@ def main() -> None:
         link = f"https://x.com/{USERNAME}/status/{p['id']}"
         send_telegram(f"{p['text'][:3500]}\n\n{link}")
         state["last_id"] = p["id"]
-        save_state(state)  # saved after every send -> never re-sends
+        save_state(state)  # saved after every send, so it never re-sends
         time.sleep(3)
 
 
