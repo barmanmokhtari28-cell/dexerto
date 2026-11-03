@@ -39,12 +39,17 @@ UA = os.environ.get("USER_AGENT") or (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
+DEFAULT_INSTANCES = (
+    "https://nitter.mizuki.st,"
+    "https://nitter.mie.foundation,"
+    "https://nitter.pp.ua,"
+    "https://nitter.netbub.com,"
+    "https://shitter.thepixora.com,"
+    "https://nitter.kareem.one"
+)
 NITTER_INSTANCES = [
     s.strip().rstrip("/")
-    for s in (
-        os.environ.get("NITTER_INSTANCES")
-        or "https://nitter.mizuki.st,https://nitter.mie.foundation,https://nitter.pp.ua,https://nitter.netbub.com,https://shitter.thepixora.com,https://nitter.kareem.one"
-    ).split(",")
+    for s in (os.environ.get("NITTER_INSTANCES") or DEFAULT_INSTANCES).split(",")
     if s.strip()
 ]
 EXTRA_FEEDS = [u.strip() for u in (os.environ.get("EXTRA_FEEDS") or "").split(",") if u.strip()]
@@ -137,4 +142,87 @@ def fetch_posts() -> list[dict]:
     sources = []
     if EXTRA_FEEDS:
         sources.append(("extra feeds", from_extra_feeds))
-    sources += [("nitter",
+    sources.append(("nitter", from_nitter))
+    sources.append(("syndication", from_syndication))
+    for name, fn in sources:
+        log(f"Trying {name}...")
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            log(f"  {name} failed: {e}")
+    sys.exit("All free sources failed this run (nothing sent, state unchanged).")
+
+
+# ---------- helpers ----------
+def id_time(post_id: str) -> datetime:
+    """Post IDs embed their creation time."""
+    ms = (int(post_id) >> 22) + 1288834974657
+    return datetime.fromtimestamp(ms / 1000, timezone.utc)
+
+
+def pick_new(posts: list[dict], last_id: str | None) -> list[dict]:
+    seen, out = set(), []
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=FIRST_RUN_HOURS)
+    for p in posts:
+        if p["id"] in seen:
+            continue
+        seen.add(p["id"])
+        if last_id:
+            if int(p["id"]) <= int(last_id):
+                continue
+        elif id_time(p["id"]) < cutoff:  # first run: only look back FIRST_RUN_HOURS
+            continue
+        out.append(p)
+    return sorted(out, key=lambda p: int(p["id"]))  # oldest first
+
+
+def build_message(post: dict) -> tuple[str, dict]:
+    """Returns (HTML text, link_preview_options)."""
+    post_url = f"https://x.com/{USERNAME}/status/{post['id']}"
+    preview_url = f"https://{PREVIEW_DOMAIN}/{USERNAME}/status/{post['id']}"
+    body = html.escape(post["text"][:3000])
+    text = f'{body}\n\n<a href="{post_url}">{html.escape(LINK_TEXT)}</a>'
+    if LINK_PREVIEW:
+        options = {"url": preview_url, "prefer_large_media": True}
+    else:
+        options = {"is_disabled": True}
+    return text, options
+
+
+def send_telegram(text: str, preview_options: dict) -> None:
+    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TG_CHAT,
+        "text": text,
+        "parse_mode": "HTML",
+        "link_preview_options": preview_options,
+    }
+    for _ in range(5):
+        r = requests.post(url, json=payload, timeout=30)
+        if r.status_code == 429:
+            time.sleep(r.json().get("parameters", {}).get("retry_after", 5) + 1)
+            continue
+        if not r.ok:
+            sys.exit(f"Telegram error {r.status_code}: {r.text}")
+        return
+    sys.exit("Telegram: too many rate-limit retries")
+
+
+def main() -> None:
+    state = load_state()
+    fetched = fetch_posts()
+    if fetched:
+        newest = max(fetched, key=lambda p: int(p["id"]))
+        log(f"Newest post in feed: {id_time(newest['id']):%Y-%m-%d %H:%M} UTC")
+    posts = pick_new(fetched, state.get("last_id"))
+    log(f"{len(posts)} new post(s) from @{USERNAME}")
+    for p in posts:
+        text, options = build_message(p)
+        send_telegram(text, options)
+        state["last_id"] = p["id"]
+        save_state(state)  # saved after every send, so it never re-sends
+        time.sleep(3)
+
+
+if __name__ == "__main__":
+    main()
