@@ -2,7 +2,7 @@
 
 No X API is used. Posts are read from (in order):
   1. your own feeds in EXTRA_FEEDS (optional, any RSS URL)
-  2. public Nitter RSS feeds (xcancel.com etc.)
+  2. public Nitter RSS feeds
   3. X's public "syndication" timeline
 The first source that answers wins.
 """
@@ -32,7 +32,7 @@ NITTER_INSTANCES = [
     s.strip().rstrip("/")
     for s in (
         os.environ.get("NITTER_INSTANCES")
-        or "https://xcancel.com,https://nitter.poast.org,https://nitter.privacydev.net"
+        or "https://nitter.mizuki.st,https://nitter.mie.foundation,https://nitter.pp.ua,https://nitter.netbub.com,https://shitter.thepixora.com,https://nitter.kareem.one"
     ).split(",")
     if s.strip()
 ]
