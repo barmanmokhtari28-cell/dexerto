@@ -22,7 +22,8 @@ USERNAME = os.environ.get("X_USERNAME") or "Dexerto"
 TG_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TG_CHAT = os.environ["TELEGRAM_CHAT_ID"]
 
-FIRST_RUN_HOURS = int(os.environ.get("FIRST_RUN_HOURS") or "4")
+# On the very first run (no saved state yet), how far back to look.
+FIRST_RUN_HOURS = int(os.environ.get("FIRST_RUN_HOURS") or "24")
 LINK_PREVIEW = os.environ.get("TG_LINK_PREVIEW") == "1"
 UA = os.environ.get("USER_AGENT") or (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -153,7 +154,7 @@ def pick_new(posts: list[dict], last_id: str | None) -> list[dict]:
         if last_id:
             if int(p["id"]) <= int(last_id):
                 continue
-        elif id_time(p["id"]) < cutoff:  # first run: don't flood the channel
+        elif id_time(p["id"]) < cutoff:  # first run: only look back FIRST_RUN_HOURS
             continue
         out.append(p)
     return sorted(out, key=lambda p: int(p["id"]))  # oldest first
@@ -175,7 +176,11 @@ def send_telegram(text: str) -> None:
 
 def main() -> None:
     state = load_state()
-    posts = pick_new(fetch_posts(), state.get("last_id"))
+    fetched = fetch_posts()
+    if fetched:
+        newest = max(fetched, key=lambda p: int(p["id"]))
+        log(f"Newest post in feed: {id_time(newest['id']):%Y-%m-%d %H:%M} UTC")
+    posts = pick_new(fetched, state.get("last_id"))
     log(f"{len(posts)} new post(s) from @{USERNAME}")
     for p in posts:
         link = f"https://x.com/{USERNAME}/status/{p['id']}"
