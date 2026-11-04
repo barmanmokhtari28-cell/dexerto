@@ -6,7 +6,11 @@ No X API is used. Posts are read from (in order):
   3. X's public "syndication" timeline
 The first source that answers wins.
 
-Each Telegram message = post text + a "Dexerto 🪻" hyperlink to the x.com post.
+Each Telegram message (HTML rich text):
+  <b>headline</b>
+  <blockquote>rest of the post</blockquote>
+  🔗 Dexerto 🪻  (hyperlink to the x.com post)
+  #سرگرمی
 The preview card (photo/video) is built from a fxtwitter.com copy of the post.
 """
 import html
@@ -34,6 +38,8 @@ LINK_PREVIEW = (os.environ.get("TG_LINK_PREVIEW") or "1") != "0"
 PREVIEW_DOMAIN = os.environ.get("PREVIEW_DOMAIN") or "fxtwitter.com"
 # Text of the hyperlink at the bottom of each message.
 LINK_TEXT = os.environ.get("LINK_TEXT") or "Dexerto 🪻"
+# Hashtag(s) added at the very end of every message.
+HASHTAGS = os.environ.get("HASHTAGS") or "#سرگرمی"
 
 UA = os.environ.get("USER_AGENT") or (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -176,12 +182,33 @@ def pick_new(posts: list[dict], last_id: str | None) -> list[dict]:
     return sorted(out, key=lambda p: int(p["id"]))  # oldest first
 
 
+def split_headline(text: str) -> tuple[str, str]:
+    """Split a post into (headline, rest). The headline is the first line or
+    first sentence; if the post has no clear split, everything is the headline."""
+    text = text.strip()
+    if "\n" in text:
+        head, rest = text.split("\n", 1)
+        return head.strip(), rest.strip()
+    m = re.match(r"(.{10,220}?[.!?])\s+(\S.*)$", text, re.S)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    return text, ""
+
+
 def build_message(post: dict) -> tuple[str, dict]:
     """Returns (HTML text, link_preview_options)."""
     post_url = f"https://x.com/{USERNAME}/status/{post['id']}"
     preview_url = f"https://{PREVIEW_DOMAIN}/{USERNAME}/status/{post['id']}"
-    body = html.escape(post["text"][:3000])
-    text = f'{body}\n\n<a href="{post_url}">{html.escape(LINK_TEXT)}</a>'
+
+    head, rest = split_headline(post["text"][:3000])
+    parts = [f"<b>{html.escape(head)}</b>"]
+    if rest:
+        parts.append(f"<blockquote>{html.escape(rest)}</blockquote>")
+    parts.append(f'🔗 <a href="{post_url}">{html.escape(LINK_TEXT)}</a>')
+    if HASHTAGS:
+        parts.append(html.escape(HASHTAGS))
+    text = "\n\n".join(parts)
+
     if LINK_PREVIEW:
         options = {"url": preview_url, "prefer_large_media": True}
     else:
